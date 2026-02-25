@@ -164,14 +164,18 @@ Query → BM25 FTS ─────┘
 
 ### 什么是 “OpenClaw workspace”？
 
-本文档中的 **OpenClaw workspace** 指的是：你存放 OpenClaw 配置文件（例如 `openclaw.json`），并且从该目录运行/管理 gateway 的工作目录。
+在 OpenClaw 中，**agent workspace（工作区）** 是 Agent 的工作目录（默认：`~/.openclaw/workspace`）。
+根据官方文档，workspace 是 OpenClaw 的 **默认工作目录（cwd）**，因此 **相对路径会以 workspace 为基准解析**（除非你使用绝对路径）。
+
+> 说明：OpenClaw 的配置文件通常在 `~/.openclaw/openclaw.json`，与 workspace 是分开的。
 
 **最常见的安装错误：** 把插件 clone 到别的目录，但在配置里仍然写 `"paths": ["plugins/memory-lancedb-pro"]`（这是**相对路径**）。OpenClaw 会去 workspace 下找 `plugins/memory-lancedb-pro`，导致加载失败，于是出现“安装位置不对”的反馈。
 
 ### 方案 A（推荐）：克隆到 workspace 的 `plugins/` 目录下
 
 ```bash
-# 1) 进入你的 OpenClaw workspace（包含 openclaw.json 的目录）
+# 1) 进入你的 OpenClaw workspace（默认：~/.openclaw/workspace）
+#    （可通过 agents.defaults.workspace 改成你自己的路径）
 cd /path/to/your/openclaw/workspace
 
 # 2) 把插件克隆到 workspace/plugins/ 下

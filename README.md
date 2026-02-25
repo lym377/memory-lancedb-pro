@@ -163,14 +163,18 @@ Filters out low-quality content at both auto-capture and tool-store stages:
 
 ### What is the “OpenClaw workspace”?
 
-In this README, **OpenClaw workspace** means the directory where you keep your OpenClaw config (e.g. `openclaw.json`) and from which you run/manage the gateway.
+In OpenClaw, the **agent workspace** is the agent’s working directory (default: `~/.openclaw/workspace`).
+According to the docs, the workspace is the **default cwd**, and **relative paths are resolved against the workspace** (unless you use an absolute path).
 
-**Common mistake:** cloning the plugin somewhere else, while keeping `plugins.load.paths: ["plugins/memory-lancedb-pro"]` (a **relative path**). In that case OpenClaw will look for the plugin under your workspace and fail to load it.
+> Note: OpenClaw configuration typically lives under `~/.openclaw/openclaw.json` (separate from the workspace).
+
+**Common mistake:** cloning the plugin somewhere else, while keeping `plugins.load.paths: ["plugins/memory-lancedb-pro"]` (a **relative path**). In that case OpenClaw will look for `plugins/memory-lancedb-pro` under your **workspace** and fail to load it.
 
 ### Option A (recommended): clone into `plugins/` under your workspace
 
 ```bash
-# 1) Go to your OpenClaw workspace (the directory that contains your openclaw.json)
+# 1) Go to your OpenClaw workspace (default: ~/.openclaw/workspace)
+#    (You can override it via agents.defaults.workspace.)
 cd /path/to/your/openclaw/workspace
 
 # 2) Clone the plugin into workspace/plugins/
