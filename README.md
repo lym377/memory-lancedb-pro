@@ -288,6 +288,7 @@ openclaw config get plugins.slots.memory
     "rerankApiKey": "jina_xxx",
     "rerankModel": "jina-reranker-v2-base-multilingual",
     "rerankEndpoint": "https://api.jina.ai/v1/rerank",
+    "rerankProvider": "jina",
     "candidatePoolSize": 20,
     "recencyHalfLifeDays": 14,
     "recencyWeight": 0.1,

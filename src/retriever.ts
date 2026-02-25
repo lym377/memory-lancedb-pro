@@ -28,9 +28,12 @@ export interface RetrievalConfig {
   rerankApiKey?: string;
   /** Reranker model (default: jina-reranker-v2-base-multilingual) */
   rerankModel?: string;
-  /** Reranker API endpoint (default: https://api.jina.ai/v1/rerank).
-   *  Compatible with any service that accepts the Jina/OpenAI rerank request format. */
+  /** Reranker API endpoint (default: https://api.jina.ai/v1/rerank). */
   rerankEndpoint?: string;
+  /** Reranker provider format. Determines request/response shape and auth header.
+   *  - "jina" (default): Authorization: Bearer, string[] documents, results[].relevance_score
+   *  - "pinecone": Api-Key header, {text}[] documents, data[].score */
+  rerankProvider?: "jina" | "pinecone";
   /**
    * Length normalization: penalize long entries that dominate via sheer keyword
    * density. Formula: score *= 1 / (1 + log2(charLen / anchor)).
@@ -105,6 +108,78 @@ function clampInt(value: number, min: number, max: number): number {
 function clamp01(value: number, fallback: number): number {
   if (!Number.isFinite(value)) return Number.isFinite(fallback) ? fallback : 0;
   return Math.min(1, Math.max(0, value));
+}
+
+// ============================================================================
+// Rerank Provider Adapters
+// ============================================================================
+
+type RerankProvider = "jina" | "pinecone";
+
+interface RerankItem { index: number; score: number }
+
+/** Build provider-specific request headers and body */
+function buildRerankRequest(
+  provider: RerankProvider,
+  apiKey: string,
+  model: string,
+  query: string,
+  documents: string[],
+  topN: number,
+): { headers: Record<string, string>; body: Record<string, unknown> } {
+  switch (provider) {
+    case "pinecone":
+      return {
+        headers: {
+          "Content-Type": "application/json",
+          "Api-Key": apiKey,
+          "X-Pinecone-API-Version": "2024-10",
+        },
+        body: {
+          model,
+          query,
+          documents: documents.map(text => ({ text })),
+          top_n: topN,
+          rank_fields: ["text"],
+        },
+      };
+    case "jina":
+    default:
+      return {
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+        },
+        body: {
+          model,
+          query,
+          documents,
+          top_n: topN,
+        },
+      };
+  }
+}
+
+/** Parse provider-specific response into unified format */
+function parseRerankResponse(
+  provider: RerankProvider,
+  data: Record<string, unknown>,
+): RerankItem[] | null {
+  switch (provider) {
+    case "pinecone": {
+      // Pinecone: { data: [{ index, score, document }] }
+      const items = data.data as Array<{ index: number; score: number }> | undefined;
+      if (!Array.isArray(items)) return null;
+      return items.map(r => ({ index: r.index, score: r.score }));
+    }
+    case "jina":
+    default: {
+      // Jina / SiliconFlow: { results: [{ index, relevance_score }] }
+      const items = data.results as Array<{ index: number; relevance_score: number }> | undefined;
+      if (!Array.isArray(items)) return null;
+      return items.map(r => ({ index: r.index, score: r.relevance_score }));
+    }
+  }
 }
 
 // Cosine similarity for reranking fallback
@@ -337,7 +412,7 @@ export class MemoryRetriever {
   }
 
   /**
-   * Rerank results using Jina cross-encoder API (real rerank).
+   * Rerank results using cross-encoder API (Jina, Pinecone, or compatible).
    * Falls back to cosine similarity if API is unavailable or fails.
    */
   private async rerankResults(query: string, queryVector: number[], results: RetrievalResult[]): Promise<RetrievalResult[]> {
@@ -345,53 +420,49 @@ export class MemoryRetriever {
       return results;
     }
 
-    // Try cross-encoder rerank via Jina API
+    // Try cross-encoder rerank via configured provider API
     if (this.config.rerank === "cross-encoder" && this.config.rerankApiKey) {
       try {
-        const documents = results.map(r => r.entry.text);
+        const provider = this.config.rerankProvider || "jina";
         const model = this.config.rerankModel || "jina-reranker-v2-base-multilingual";
+        const endpoint = this.config.rerankEndpoint || "https://api.jina.ai/v1/rerank";
+        const documents = results.map(r => r.entry.text);
+
+        // Build provider-specific request
+        const { headers, body } = buildRerankRequest(provider, this.config.rerankApiKey, model, query, documents, results.length);
 
         // Timeout: 5 seconds to prevent stalling retrieval pipeline
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 5000);
 
-        const endpoint = this.config.rerankEndpoint || "https://api.jina.ai/v1/rerank";
         const response = await fetch(endpoint, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${this.config.rerankApiKey}`,
-          },
-          body: JSON.stringify({
-            model,
-            query,
-            documents,
-            top_n: results.length,
-          }),
+          headers,
+          body: JSON.stringify(body),
           signal: controller.signal,
         });
 
         clearTimeout(timeout);
 
         if (response.ok) {
-          const data = await response.json() as {
-            results?: Array<{ index: number; relevance_score: number }>;
-          };
+          const data = await response.json() as Record<string, unknown>;
 
-          // Validate response shape
-          if (!Array.isArray(data.results)) {
+          // Parse provider-specific response into unified format
+          const parsed = parseRerankResponse(provider, data);
+
+          if (!parsed) {
             console.warn("Rerank API: invalid response shape, falling back to cosine");
           } else {
             // Build a Set of returned indices to identify unreturned candidates
-            const returnedIndices = new Set(data.results.map(r => r.index));
+            const returnedIndices = new Set(parsed.map(r => r.index));
 
-            const reranked = data.results
+            const reranked = parsed
               .filter(item => item.index >= 0 && item.index < results.length)
               .map(item => {
                 const original = results[item.index];
                 // Blend: 60% cross-encoder score + 40% original fused score
                 const blendedScore = clamp01(
-                  item.relevance_score * 0.6 + original.score * 0.4,
+                  item.score * 0.6 + original.score * 0.4,
                   original.score * 0.5,
                 );
                 return {
@@ -399,7 +470,7 @@ export class MemoryRetriever {
                   score: blendedScore,
                   sources: {
                     ...original.sources,
-                    reranked: { score: item.relevance_score },
+                    reranked: { score: item.score },
                   },
                 };
               });
@@ -412,7 +483,8 @@ export class MemoryRetriever {
             return [...reranked, ...unreturned].sort((a, b) => b.score - a.score);
           }
         } else {
-          console.warn(`Rerank API returned ${response.status}, falling back to cosine`);
+          const errText = await response.text().catch(() => "");
+          console.warn(`Rerank API returned ${response.status}: ${errText.slice(0, 200)}, falling back to cosine`);
         }
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {

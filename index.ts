@@ -47,6 +47,7 @@ interface PluginConfig {
     rerankApiKey?: string;
     rerankModel?: string;
     rerankEndpoint?: string;
+    rerankProvider?: "jina" | "pinecone";
     recencyHalfLifeDays?: number;
     recencyWeight?: number;
     filterNoise?: boolean;
