@@ -407,6 +407,44 @@ openclaw memory migrate verify [--source /path]
 
 ---
 
+## Custom Commands (e.g. `/lesson`)
+
+This plugin provides the core memory tools (`memory_store`, `memory_recall`, `memory_forget`, `memory_update`). You can define custom slash commands in your Agent's system prompt to create convenient shortcuts.
+
+### Example: `/lesson` command
+
+Add this to your `CLAUDE.md`, `AGENTS.md`, or system prompt:
+
+```markdown
+## /lesson command
+When the user sends `/lesson <content>`:
+1. Use memory_store to save as category=fact (the raw knowledge)
+2. Use memory_store to save as category=decision (actionable takeaway)
+3. Confirm what was saved
+```
+
+### Example: `/remember` command
+
+```markdown
+## /remember command
+When the user sends `/remember <content>`:
+1. Use memory_store to save with appropriate category and importance
+2. Confirm with the stored memory ID
+```
+
+### Built-in Tools Reference
+
+| Tool | Description |
+|------|-------------|
+| `memory_store` | Store a memory (supports category, importance, scope) |
+| `memory_recall` | Search memories (hybrid vector + BM25 retrieval) |
+| `memory_forget` | Delete a memory by ID or search query |
+| `memory_update` | Update an existing memory in-place |
+
+> **Note**: These tools are registered automatically when the plugin loads. Custom commands like `/lesson` are not built into the plugin — they are defined at the Agent/system-prompt level and simply call these tools.
+
+---
+
 ## Database Schema
 
 LanceDB table `memories`:
